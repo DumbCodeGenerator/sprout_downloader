@@ -1,6 +1,7 @@
 using System;
 using System.ComponentModel;
 using System.Drawing;
+using System.Drawing.Text;
 using System.Windows.Forms;
 
 namespace Sprout_Downloader
@@ -152,6 +153,8 @@ namespace Sprout_Downloader
         {
             if (VisualMode != ProgressBarDisplayMode.NoText)
             {
+                g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+
                 var text = _textToDraw;
 
                 var len = g.MeasureString(text, TextFont);
