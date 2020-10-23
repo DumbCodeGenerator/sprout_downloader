@@ -5,3 +5,6 @@
 ## Usage:
   * Download exe from releases
   * Run it and follow the instructions
+
+## Also:
+You can use script on python 3.7+: https://github.com/DumbCodeGenerator/sprout_downloader_python
