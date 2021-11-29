@@ -1,10 +1,7 @@
-using System;
 using System.ComponentModel;
-using System.Drawing;
 using System.Drawing.Text;
-using System.Windows.Forms;
 
-namespace Sprout_Downloader
+namespace Sprout_Downloader.UI
 {
     public enum ProgressBarDisplayMode
     {
@@ -18,11 +15,11 @@ namespace Sprout_Downloader
 
     public class TextProgressBar : ProgressBar
     {
-        private SolidBrush _progressColourBrush = (SolidBrush) Brushes.LightGreen;
+        private SolidBrush _progressColourBrush = (SolidBrush)Brushes.LightGreen;
 
         private string _text = string.Empty;
 
-        private SolidBrush _textColourBrush = (SolidBrush) Brushes.Black;
+        private SolidBrush _textColourBrush = (SolidBrush)Brushes.Black;
 
         private ProgressBarDisplayMode _visualMode = ProgressBarDisplayMode.CurrProgress;
 
@@ -90,7 +87,7 @@ namespace Sprout_Downloader
         {
             get
             {
-                var text = CustomText;
+                string text = CustomText;
 
                 switch (VisualMode)
                 {
@@ -113,7 +110,7 @@ namespace Sprout_Downloader
             set { }
         }
 
-        private string _percentageStr => $"{(int) ((float) Value - Minimum) / ((float) Maximum - Minimum) * 100} %";
+        private string _percentageStr => $"{(int)((float)Value - Minimum) / ((float)Maximum - Minimum) * 100} %";
 
         private string _currProgressStr => $"{Value}/{Maximum}";
 
@@ -125,7 +122,7 @@ namespace Sprout_Downloader
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            var g = e.Graphics;
+            Graphics g = e.Graphics;
 
             DrawProgressBar(g);
 
@@ -134,7 +131,7 @@ namespace Sprout_Downloader
 
         private void DrawProgressBar(Graphics g)
         {
-            var rect = ClientRectangle;
+            Rectangle rect = ClientRectangle;
 
             ProgressBarRenderer.DrawHorizontalBar(g, rect);
 
@@ -142,7 +139,7 @@ namespace Sprout_Downloader
 
             if (Value > 0)
             {
-                var clip = new Rectangle(rect.X, rect.Y, (int) Math.Round((float) Value / Maximum * rect.Width),
+                Rectangle clip = new(rect.X, rect.Y, (int)Math.Round((float)Value / Maximum * rect.Width),
                     rect.Height);
 
                 g.FillRectangle(_progressColourBrush, clip);
@@ -155,11 +152,11 @@ namespace Sprout_Downloader
             {
                 g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
 
-                var text = _textToDraw;
+                string text = _textToDraw;
 
-                var len = g.MeasureString(text, TextFont);
+                SizeF len = g.MeasureString(text, TextFont);
 
-                var location = new Point(Width / 2 - (int) len.Width / 2, Height / 2 - (int) len.Height / 2);
+                Point location = new(Width / 2 - (int)len.Width / 2, Height / 2 - (int)len.Height / 2);
 
                 g.DrawString(text, TextFont, _textColourBrush, location);
             }

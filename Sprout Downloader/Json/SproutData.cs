@@ -1,21 +1,20 @@
-﻿using System.Collections.Generic;
-using Newtonsoft.Json;
+﻿using System.Text.Json.Serialization;
 
-namespace Sprout_Downloader
+namespace Sprout_Downloader.Json
 {
     public class SproutData
     {
-        [JsonProperty("title")] public string Title { get; set; }
+        [JsonPropertyName("title")] public string Title { get; set; }
 
-        [JsonProperty("duration")] public double Duration { get; set; }
+        [JsonPropertyName("duration")] public double Duration { get; set; }
 
-        [JsonProperty("sessionID")] public string SessionId { get; set; }
+        [JsonPropertyName("sessionID")] public string SessionId { get; set; }
 
-        [JsonProperty("s3_user_hash")] public string UserHash { get; set; }
+        [JsonPropertyName("s3_user_hash")] public string UserHash { get; set; }
 
-        [JsonProperty("s3_video_hash")] public string VideoHash { get; set; }
+        [JsonPropertyName("s3_video_hash")] public string VideoHash { get; set; }
 
-        [JsonProperty("signatures")] public Dictionary<string, Signature> Signatures { get; set; }
+        [JsonPropertyName("signatures")] public Dictionary<string, Signature> Signatures { get; set; }
 
         public string SignUrl(string url)
         {
@@ -41,11 +40,11 @@ namespace Sprout_Downloader
 
     public class Signature
     {
-        [JsonProperty("CloudFront-Policy")] public string Policy { get; set; }
+        [JsonPropertyName("CloudFront-Policy")] public string Policy { get; set; }
 
-        [JsonProperty("CloudFront-Signature")] public string SignatureValue { get; set; }
+        [JsonPropertyName("CloudFront-Signature")] public string SignatureValue { get; set; }
 
-        [JsonProperty("CloudFront-Key-Pair-Id")]
+        [JsonPropertyName("CloudFront-Key-Pair-Id")]
         public string KeyIdPair { get; set; }
 
         public override string ToString()

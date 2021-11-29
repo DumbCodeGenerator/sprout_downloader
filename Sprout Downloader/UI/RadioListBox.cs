@@ -1,12 +1,9 @@
-using System;
 using System.ComponentModel;
 using System.Data;
-using System.Drawing;
 using System.Drawing.Text;
-using System.Windows.Forms;
 using System.Windows.Forms.VisualStyles;
 
-namespace Sprout_Downloader
+namespace Sprout_Downloader.UI
 {
     public sealed class RadioListBox : ListBox
     {
@@ -21,7 +18,7 @@ namespace Sprout_Downloader
             SelectionMode = SelectionMode.One;
             ItemHeight = FontHeight;
 
-            _align = new StringFormat(StringFormat.GenericDefault) {LineAlignment = StringAlignment.Center};
+            _align = new StringFormat(StringFormat.GenericDefault) { LineAlignment = StringAlignment.Center };
 
             // Force transparent analisys
             BackColor = BackColor;
@@ -79,7 +76,7 @@ namespace Sprout_Downloader
         // Main paiting method
         protected override void OnDrawItem(DrawItemEventArgs e)
         {
-            var maxItem = Items.Count - 1;
+            int maxItem = Items.Count - 1;
             e.Graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
 
             if (e.Index < 0 || e.Index > maxItem)
@@ -90,16 +87,16 @@ namespace Sprout_Downloader
             }
 
             // Calculate bounds for background, if last item paint up to bottom of control
-            var backRect = e.Bounds;
+            Rectangle backRect = e.Bounds;
             if (e.Index == maxItem)
                 backRect.Height = ClientRectangle.Top + ClientRectangle.Height - e.Bounds.Top;
             e.Graphics.FillRectangle(_backBrush, backRect);
 
             // Determines text color/brush
             Brush textBrush;
-            var isChecked = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
+            bool isChecked = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
 
-            var state = isChecked ? RadioButtonState.CheckedNormal : RadioButtonState.UncheckedNormal;
+            RadioButtonState state = isChecked ? RadioButtonState.CheckedNormal : RadioButtonState.UncheckedNormal;
             if ((e.State & DrawItemState.Disabled) == DrawItemState.Disabled)
             {
                 textBrush = SystemBrushes.GrayText;
@@ -116,11 +113,11 @@ namespace Sprout_Downloader
             }
 
             // Determines bounds for text and radio button
-            var glyphSize = RadioButtonRenderer.GetGlyphSize(e.Graphics, state);
-            var glyphLocation = e.Bounds.Location;
+            Size glyphSize = RadioButtonRenderer.GetGlyphSize(e.Graphics, state);
+            Point glyphLocation = e.Bounds.Location;
             glyphLocation.Y += (e.Bounds.Height - glyphSize.Height) / 2;
 
-            var bounds = new Rectangle(e.Bounds.X + glyphSize.Width + 8, e.Bounds.Y,
+            Rectangle bounds = new(e.Bounds.X + glyphSize.Width + 8, e.Bounds.Y,
                 e.Bounds.Width - glyphSize.Width + 8, e.Bounds.Height);
 
             // Draws the radio button
@@ -128,7 +125,7 @@ namespace Sprout_Downloader
 
             // Draws the text
             if (!string.IsNullOrEmpty(DisplayMember)) // Bound Datatable? Then show the column written in Displaymember
-                e.Graphics.DrawString(((DataRowView) Items[e.Index])[DisplayMember].ToString(),
+                e.Graphics.DrawString(((DataRowView)Items[e.Index])[DisplayMember].ToString(),
                     e.Font, textBrush, bounds, _align);
             else
                 e.Graphics.DrawString(Items[e.Index].ToString(), e.Font, textBrush, bounds, _align);
@@ -142,7 +139,7 @@ namespace Sprout_Downloader
         {
             if (m.Msg == 0x0014) // WM_ERASEBKGND
             {
-                m.Result = (IntPtr) 1; // avoid default background erasing
+                m.Result = (IntPtr)1; // avoid default background erasing
                 return;
             }
 

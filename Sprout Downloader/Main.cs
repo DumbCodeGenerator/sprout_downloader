@@ -1,33 +1,33 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Drawing;
-using System.IO;
-using System.Linq;
+﻿using Sprout_Downloader.Json;
+using Sprout_Downloader.Util;
 using System.Net;
-using System.Net.Http;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
-using System.Windows.Forms;
-using Newtonsoft.Json;
 
 namespace Sprout_Downloader
 {
     public partial class Main : Form
     {
-        private const int OrigHeight = 205;
-        private const int InfoHeight = 260;
-        private const int FullHeight = 363;
+        private const int OrigHeight = 492;
+        private const int InfoHeight = 565;
+        private const int FullHeight = 665;
 
         private static readonly string[] SizeSuffixes =
             {"bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"};
 
-        private static readonly CookieContainer Cookies = new CookieContainer();
+        private static readonly string _totalProgTemp = "Downloaded videos: %current/%total";
+
+        private int _currentProg = 0;
+
+        private static readonly CookieContainer Cookies = new();
 
         private static readonly HttpClient
-            WebClient = new HttpClient(new HttpClientHandler {CookieContainer = Cookies});
+            WebClient = new(new HttpClientHandler { CookieContainer = Cookies });
 
-        private string _videoUrl;
+        private List<ParsedURL> _videoUrls;
+
+        private bool _stopButton = false;
 
 
         public Main()
@@ -35,137 +35,160 @@ namespace Sprout_Downloader
             InitializeComponent();
         }
 
-        private static bool CheckUrlValid(string source)
+        private async void button1_ClickAsync(object sender, EventArgs e)
         {
-            return Uri.TryCreate(source, UriKind.Absolute, out var uriResult) &&
-                   (uriResult.Scheme == Uri.UriSchemeHttps || uriResult.Scheme == Uri.UriSchemeHttp);
-        }
+            if (_stopButton)
+            {
+                Program.Cancel();
+                ResetState();
+                return;
+            }
 
-        private async void button1_Click(object sender, EventArgs e)
-        {
-            ToggleButton(false);
+            Program.RefreshCTS();
+
+            SetStop(true);
 
             downloadProgress.CustomText = string.Empty;
 
-            _videoUrl = urlTextBox.Text;
-            if (!_videoUrl.StartsWith("http://") && !_videoUrl.StartsWith("https://"))
-                _videoUrl = "https://" + _videoUrl;
+            _videoUrls = urlTextBox.ParseURL();
 
             Height = OrigHeight;
-            if (!CheckUrlValid(_videoUrl))
+            if (!_videoUrls.Any())
             {
-                ShowError("Invalid URL!");
+                ShowError("Couldn't parse not a single URL");
                 return;
             }
 
             Height = FullHeight;
-            SetAction("Getting link...");
-            downloadProgress.Value = 0;
+            UpdateTotalProg();
 
-            using (var response = await WebClient.GetAsync(_videoUrl))
+            foreach (ParsedURL videoUrl in _videoUrls)
             {
-                if (response == null)
-                {
-                    ShowError("Empty response!");
-                    return;
-                }
+                if (Program.IsCancellationRequested())
+                    break;
 
-                var responseString = await response.Content.ReadAsStringAsync();
-
-                if (response.StatusCode != HttpStatusCode.OK && responseString.Contains("Password Protected Video",
-                    StringComparison.OrdinalIgnoreCase))
-                {
-                    var authToken = Regex.Match(responseString, "name='authenticity_token' value='(.*?)'").Groups[1]
-                        .Value;
-
-                    if (string.IsNullOrWhiteSpace(authToken))
-                        ShowError("Can't get auth token from the page");
-                    else
-                        PasswordProcessing(authToken);
-                }
-                else if (response.StatusCode != HttpStatusCode.OK)
-                {
-                    ShowError($"Can't get the link. Status Code: {response.StatusCode}");
-                }
-                else
-                {
-                    DownloadVideo(responseString);
-                }
+                SetAction($"Getting link #{_currentProg + 1}...");
+                downloadProgress.Value = 0;
+                await ProcessLink(videoUrl);
             }
         }
 
-        private async void PasswordProcessing(string authToken)
+        private async Task ProcessLink(ParsedURL item)
         {
-            using (var passDialog = new PasswordInput())
+            if (Program.IsCancellationRequested())
+                return;
+
+            using HttpResponseMessage response = await WebClient.GetAsync(item.URL, Program.GetCancellationToken());
+            if (response == null)
             {
+                ShowError("Empty response!");
+                return;
+            }
+
+            string responseString = await response.Content.ReadAsStringAsync(Program.GetCancellationToken());
+
+            if (response.StatusCode != HttpStatusCode.OK && responseString.Contains("Password Protected Video",
+                StringComparison.OrdinalIgnoreCase))
+            {
+                string authToken = Regex.Match(responseString, "name='authenticity_token' value='(.*?)'").Groups[1]
+                    .Value;
+
+                if (string.IsNullOrWhiteSpace(authToken))
+                    ShowError("Can't get auth token from the page");
+                else
+                    await CheckIfNeedInput(authToken, item);
+            }
+            else if (response.StatusCode != HttpStatusCode.OK)
+            {
+                ShowError($"Can't get the link. Status Code: {response.StatusCode}");
+            }
+            else
+            {
+                await DownloadVideo(responseString, item);
+            }
+        }
+
+        private async Task CheckIfNeedInput(string authToken, ParsedURL item)
+        {
+            if (Program.IsCancellationRequested())
+                return;
+
+            if (item.Password == null)
+            {
+                using PasswordInput passDialog = new(item.URL);
                 if (passDialog.ShowDialog(this) == DialogResult.OK)
-                {
-                    var values = new Dictionary<string, string>
-                    {
-                        {"password", passDialog.GetPassword()},
+                    await PutPassword(authToken, item.SetPassword(passDialog.GetPassword()));
+                else
+                    ShowError("Password input cancelled");
+            }
+            else
+            {
+                await PutPassword(authToken, item);
+            }
+        }
+
+        private async Task PutPassword(string authToken, ParsedURL item)
+        {
+            if (Program.IsCancellationRequested())
+                return;
+
+            Dictionary<string, string> values = new Dictionary<string, string>()
+            {
+                        {"password", item.Password},
                         {"authenticity_token", authToken},
                         {"_method", "put"}
                     };
 
-                    var content = new FormUrlEncodedContent(values);
+            FormUrlEncodedContent content = new FormUrlEncodedContent(values);
 
-                    using (var response = await WebClient.PostAsync(_videoUrl, content))
-                    {
-                        if (response.IsSuccessStatusCode)
-                        {
-                            var responseString = await response.Content.ReadAsStringAsync();
-                            var embeddedUrl = Regex.Match(responseString, "<iframe src='(.*?)'").Groups[1].Value;
-                            if (!string.IsNullOrWhiteSpace(embeddedUrl))
-                                DownloadVideo(await WebClient.GetStringAsync(embeddedUrl));
-                            else
-                                ShowError("Didn't find embedded video url");
-                        }
-                        else
-                        {
-                            ShowError($"Can't log in. Probably wrong password. Status Code: {response.StatusCode}");
-                        }
-                    }
-                }
+            using HttpResponseMessage response = await WebClient.PostAsync(item.URL, content, Program.GetCancellationToken());
+
+            if (response.IsSuccessStatusCode)
+            {
+                string responseString = await response.Content.ReadAsStringAsync(Program.GetCancellationToken());
+                string embeddedUrl = Regex.Match(responseString, "<iframe src='(.*?)'").Groups[1].Value;
+                if (!string.IsNullOrWhiteSpace(embeddedUrl))
+                    await DownloadVideo(await WebClient.GetStringAsync(embeddedUrl, Program.GetCancellationToken()), item);
                 else
-                {
-                    ShowError("Password input cancelled");
-                }
+                    ShowError("Didn't find embedded video url");
+            }
+            else
+            {
+                ShowError($"Can't log in. Probably wrong password. Status Code: {response.StatusCode}");
             }
         }
 
-        private async void DownloadVideo(string response)
+        private async Task DownloadVideo(string response, ParsedURL item)
         {
             SetAction("Getting info from index...");
-            var data = Regex.Match(response, "var dat = '(.*?)'").Groups[1].Value;
+            string data = Regex.Match(response, "var dat = '(.*?)'").Groups[1].Value;
+
+            if (string.IsNullOrWhiteSpace(data))
+            {
+                string embeddedUrl = Regex.Match(response, "<iframe src='(.*?)'").Groups[1].Value;
+
+                if (!string.IsNullOrWhiteSpace(embeddedUrl))
+                    await ProcessLink(item.SetURL(embeddedUrl));
+
+                return;
+            }
+
             data = Encoding.UTF8.GetString(Convert.FromBase64String(data));
 
-            var dataObj = JsonConvert.DeserializeObject<SproutData>(data);
+            SproutData dataObj = JsonSerializer.Deserialize(data, JsonContext.Default.SproutData);
 
             if (dataObj != null)
             {
-                var m3U8String = await WebClient.GetStringAsync(dataObj.GetIndexUrl());
-                var m3U8Obj = new M3UParser(m3U8String, dataObj);
-                using (var selector = new QualitySelector(m3U8Obj.GetQualityList()))
+                string m3U8String = await WebClient.GetStringAsync(dataObj.GetIndexUrl(), Program.GetCancellationToken());
+                M3UParser m3U8Obj = new(m3U8String, dataObj);
+
+                if (Properties.Settings.Default.bestQuality)
                 {
-                    if (selector.ShowDialog(this) == DialogResult.OK)
-                    {
-                        SetAction("Getting segments...");
-                        m3U8Obj.Index = selector.GetSelectedIndex();
-                        var playlistUrl = m3U8Obj.GetPlaylistUrl();
-                        m3U8String = await WebClient.GetStringAsync(playlistUrl);
-
-                        m3U8Obj.SetPlaylistString(m3U8String);
-
-                        SetAction($"Downloading segments: 0/{m3U8Obj.GetPlaylistParser().GetSegmentsCount()}");
-
-                        new Downloader().Start(m3U8Obj,
-                            ProgressCallback,
-                            FinishCallback);
-                    }
-                    else
-                    {
-                        ShowError("Quality Selector cancelled");
-                    }
+                    await StartDownload(m3U8Obj);
+                }
+                else
+                {
+                    await StartQualitySelector(m3U8Obj);
                 }
             }
             else
@@ -174,19 +197,49 @@ namespace Sprout_Downloader
             }
         }
 
-        private void ProgressCallback(IEnumerable<Downloader.Status> statuses, int currentSegment, int totalSegments,
+        private async Task StartQualitySelector(M3UParser m3U8Obj)
+        {
+            using QualitySelector selector = new(m3U8Obj.GetQualityList());
+            if (selector.ShowDialog(this) == DialogResult.OK)
+            {
+                await StartDownload(m3U8Obj, selector.GetSelectedIndex());
+            }
+            else
+            {
+                ShowError("Quality Selector cancelled");
+            }
+        }
+
+        private async Task StartDownload(M3UParser m3U8Obj, int qualityIndex = 0)
+        {
+            SetAction("Getting segments...");
+            m3U8Obj.Index = qualityIndex;
+            string playlistUrl = m3U8Obj.GetPlaylistUrl();
+            string m3U8String = await WebClient.GetStringAsync(playlistUrl, Program.GetCancellationToken());
+
+            m3U8Obj.SetPlaylistString(m3U8String);
+
+            SetAction($"Downloading segments: 0/{m3U8Obj.GetPlaylistParser().GetSegmentsCount()}");
+
+            await new Downloader().Start(m3U8Obj,
+                ProgressCallback,
+                FinishCallback);
+        }
+
+        private void ProgressCallback(ICollection<Downloader.Status> statuses, int currentSegment, int totalSegments,
             long fullSize)
         {
-            var enumerable = statuses as Downloader.Status[] ?? statuses.ToArray();
+            if (Program.IsCancellationRequested())
+                return;
 
-            var total = enumerable.Sum(x => x.TotalBytes);
-            var received = enumerable.Sum(x => x.BytesReceived);
+            long total = statuses.Sum(x => x.TotalBytes);
+            long received = statuses.Sum(x => x.BytesReceived);
 
-            var notAccurate = fullSize > total;
+            bool notAccurate = fullSize > total;
 
             total = notAccurate ? fullSize : total;
 
-            var percentage = (int) Math.Round((double) (100 * received) / total);
+            int percentage = (int)Math.Round((double)(100 * received) / total);
 
             SetAction($"Downloading segments: {currentSegment}/{totalSegments}");
 
@@ -202,11 +255,11 @@ namespace Sprout_Downloader
             if (value == 0) return string.Format("{0:n" + decimalPlaces + "} bytes", 0);
 
             // mag is 0 for bytes, 1 for KB, 2, for MB, etc.
-            var mag = (int) Math.Log(value, 1024);
+            int mag = (int)Math.Log(value, 1024);
 
             // 1L << (mag * 10) == 2 ^ (10 * mag) 
             // [i.e. the number of bytes in the unit corresponding to mag]
-            var adjustedSize = (decimal) value / (1L << (mag * 10));
+            decimal adjustedSize = (decimal)value / (1L << (mag * 10));
 
             // make adjustment when the value is large enough that
             // it would round up to 1000 or more
@@ -221,32 +274,56 @@ namespace Sprout_Downloader
                 SizeSuffixes[mag]);
         }
 
-        private async void FinishCallback(string[] files, string title, Key key)
+        private async void FinishCallback(M3UParser parser)
         {
+            if (Program.IsCancellationRequested())
+                return;
+
             SetAction("Decrypt and concat segments into one file...");
+            string title = parser.GetVideoTitle();
+            Key key = parser.GetPlaylistParser().GetKey();
+
             await Task.Run(() =>
             {
-                using (var mainFile = File.OpenWrite(title + ".ts"))
+                using FileStream mainFile = File.OpenWrite(title + ".ts");
+                parser.GetPlaylistParser().GetSegments().ForEach(segment =>
                 {
-                    foreach (var file in files)
-                    {
-                        using (var segment = File.OpenRead(file))
-                        {
-                            Utils.Decrypt(mainFile, segment, key);
-                        }
-
-                        File.Delete(file);
-                    }
-                }
+                    using FileStream fileSeg = File.OpenRead(segment.GetFullPath());
+                    Utils.Decrypt(mainFile, fileSeg, key);
+                });
             });
-            Directory.Delete(title);
+            Directory.Delete(parser.GetSegmentsFolder(), true);
             SetAction("Convert to MP4...");
             Utils.ConvertToMp4(title, () =>
             {
-                SetAction("Video downloaded!", Color.Green);
-                this.SetPropertyThreadSafe(() => Height, InfoHeight);
-                ToggleButton(true);
+                _currentProg++;
+                if (_currentProg == _videoUrls.Count)
+                {
+                    SetAction("All videos downloaded!", Color.Green);
+                    this.SetPropertyThreadSafe(() => Height, InfoHeight);
+                    ResetState(false);
+                }
+                else
+                    UpdateTotalProg();
             });
+        }
+
+        private void UpdateTotalProg()
+        {
+            totalProgressLabel.SetPropertyThreadSafe(() => totalProgressLabel.Text, _totalProgTemp.Replace("%current", _currentProg.ToString()).Replace("%total", _videoUrls.Count.ToString()));
+        }
+
+        private void ResetState(bool resetHeight = true)
+        {
+            if (resetHeight)
+                this.SetPropertyThreadSafe(() => Height, OrigHeight);
+
+            downloadProgress.SetPropertyThreadSafe(() => downloadProgress.Value, 0);
+            downloadProgress.SetPropertyThreadSafe(() => downloadProgress.CustomText, string.Empty);
+            _currentProg = 0;
+            UpdateTotalProg();
+            SetStop(false);
+            ToggleButton(true);
         }
 
         private void SetAction(string action, Color? color = null)
@@ -255,12 +332,18 @@ namespace Sprout_Downloader
             actionLabel.SetPropertyThreadSafe(() => actionLabel.Text, action);
         }
 
+        private void SetStop(bool state)
+        {
+            _stopButton = state;
+            button1.SetPropertyThreadSafe(() => button1.Text, _stopButton ? "Stop" : "Download");
+        }
+
         private void ToggleButton(bool enable)
         {
             button1.SetPropertyThreadSafe(() => button1.Enabled, enable);
         }
 
-        private void ShowError(string text)
+        public void ShowError(string text)
         {
             Height = InfoHeight;
             actionLabel.ForeColor = Color.Red;
@@ -271,6 +354,58 @@ namespace Sprout_Downloader
         private void Form1_Load(object sender, EventArgs e)
         {
             Height = OrigHeight;
+            InitSettings();
+        }
+
+        private void InitSettings()
+        {
+            toolStripTextBox1.Text = Properties.Settings.Default.threadCount.ToString();
+            ToggleQuality();
+        }
+
+        private void toolStripTextBox1_TextChanged(object sender, EventArgs e)
+        {
+            if (int.TryParse(toolStripTextBox1.Text, out int count))
+            {
+                Properties.Settings.Default.threadCount = count;
+            }
+        }
+
+        private void Main_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            Properties.Settings.Default.Save();
+        }
+
+        private void alwaysAskToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            Properties.Settings.Default.bestQuality = false;
+            ToggleQuality();
+        }
+
+        private void alwaysTheBestToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            Properties.Settings.Default.bestQuality = true;
+            ToggleQuality();
+        }
+
+        private void ToggleQuality()
+        {
+            if (Properties.Settings.Default.bestQuality)
+            {
+                alwaysTheBestToolStripMenuItem.Checked = true;
+                if (alwaysAskToolStripMenuItem.Checked)
+                {
+                    alwaysAskToolStripMenuItem.Checked = false;
+                }
+            }
+            else
+            {
+                alwaysAskToolStripMenuItem.Checked = true;
+                if (alwaysTheBestToolStripMenuItem.Checked)
+                {
+                    alwaysTheBestToolStripMenuItem.Checked = false;
+                }
+            }
         }
     }
 }

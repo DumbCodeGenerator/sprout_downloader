@@ -1,4 +1,6 @@
-﻿namespace Sprout_Downloader
+﻿using Sprout_Downloader.UI;
+
+namespace Sprout_Downloader
 {
     partial class QualitySelector
     {
@@ -29,8 +31,8 @@
         private void InitializeComponent()
         {
             this.button1 = new System.Windows.Forms.Button();
-            this.label1 = new Sprout_Downloader.AntiAliasingLabel();
-            this.radioListBox1 = new Sprout_Downloader.RadioListBox();
+            this.label1 = new AntiAliasingLabel();
+            this.radioListBox1 = new RadioListBox();
             this.SuspendLayout();
             // 
             // button1

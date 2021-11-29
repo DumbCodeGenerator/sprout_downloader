@@ -1,10 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net;
+﻿using Sprout_Downloader.Util;
 using System.Text.RegularExpressions;
 
-namespace Sprout_Downloader
+namespace Sprout_Downloader.Json
 {
     public class M3UParser
     {
@@ -19,13 +16,13 @@ namespace Sprout_Downloader
 
             _lazyPlaylists = new Lazy<IEnumerable<Playlist>>(() =>
             {
-                var matchList = Regex.Matches(input,
+                MatchCollection matchList = Regex.Matches(input,
                     @"^#EXT-X-STREAM-INF:.*?BANDWIDTH=(.*?),RESOLUTION.*$\n^(.*?\.m3u8)$", RegexOptions.Multiline);
                 return matchList.Cast<Match>().Select(match => new Playlist
                 {
                     Quality = match.Groups[2].Value.Replace(".m3u8", "p"),
                     Url = _dataObj.SignUrl(_dataObj.GetBaseUrl() + match.Groups[2].Value),
-                    InaccurateSize = long.Parse(match.Groups[1].Value) / 8 * (long) _dataObj.Duration
+                    InaccurateSize = long.Parse(match.Groups[1].Value) / 8 * (long)_dataObj.Duration
                 });
             });
         }
@@ -42,19 +39,24 @@ namespace Sprout_Downloader
             return GetPlaylists().Select(x => x.Quality);
         }
 
+        private int GetBestQuality()
+        {
+            return GetPlaylists().Count() - 1;
+        }
+
         public string GetPlaylistUrl()
         {
-            return GetPlaylists().ElementAt(Index).Url;
+            return GetPlaylists().ElementAt(Properties.Settings.Default.bestQuality ? GetBestQuality() : Index).Url;
         }
 
         public long GetInaccurateVideoSize()
         {
-            return GetPlaylists().ElementAt(Index).InaccurateSize;
+            return GetPlaylists().ElementAt(Properties.Settings.Default.bestQuality ? GetBestQuality() : Index).InaccurateSize;
         }
 
         public void SetPlaylistString(string input)
         {
-            _playlistParser = new PlaylistParser(input, _dataObj);
+            _playlistParser = new PlaylistParser(input, _dataObj, this);
         }
 
         public PlaylistParser GetPlaylistParser()
@@ -64,39 +66,43 @@ namespace Sprout_Downloader
 
         public string GetVideoTitle()
         {
-            return _dataObj.Title;
+            return Path.GetFileNameWithoutExtension(_dataObj.Title);
+        }
+
+        public string GetSegmentsFolder()
+        {
+            return "segments_" + GetVideoTitle();
         }
     }
 
     public class PlaylistParser
     {
         private readonly Lazy<Key> _lazyKey;
-        private readonly Lazy<IEnumerable<Segment>> _lazySegments;
+        private readonly Lazy<List<Segment>> _lazySegments;
 
-        public PlaylistParser(string m3UString, SproutData dataObj)
+        public PlaylistParser(string m3UString, SproutData dataObj, M3UParser parser)
         {
             _lazyKey = new Lazy<Key>(() =>
             {
-                var match = Regex.Match(m3UString, "#EXT-X-KEY:.*?URI=\"(.*?)\".*?IV=0x(.*?)$", RegexOptions.Multiline);
-                using (var wc = new WebClient())
+                Match match = Regex.Match(m3UString, "#EXT-X-KEY:.*?URI=\"(.*?)\".*?IV=0x(.*?)$", RegexOptions.Multiline);
+                using HttpClient hc = new();
+                byte[] bytes = hc.GetByteArrayAsync(dataObj.SignUrl(dataObj.GetBaseUrl() + match.Groups[1].Value)).Result;
+                return new Key
                 {
-                    var bytes = wc.DownloadData(dataObj.SignUrl(dataObj.GetBaseUrl() + match.Groups[1].Value));
-                    return new Key
-                    {
-                        Iv = Utils.StringToByteArrayFastest(match.Groups[2].Value),
-                        Bytes = bytes
-                    };
-                }
+                    Iv = Utils.StringToByteArrayFastest(match.Groups[2].Value),
+                    Bytes = bytes
+                };
             });
 
-            _lazySegments = new Lazy<IEnumerable<Segment>>(() =>
+            _lazySegments = new Lazy<List<Segment>>(() =>
             {
-                var matchList = Regex.Matches(m3UString, "^.*?\\.ts$", RegexOptions.Multiline);
+                MatchCollection matchList = Regex.Matches(m3UString, "^.*?\\.ts$", RegexOptions.Multiline);
                 return matchList.Cast<Match>().Select(match => new Segment
                 {
-                    Filename = dataObj.Title + "/" + match.Value,
+                    Folder = parser.GetSegmentsFolder(),
+                    Filename = match.Value,
                     Url = dataObj.SignUrl(dataObj.GetBaseUrl() + match.Value)
-                });
+                }).ToList();
             });
         }
 
@@ -105,14 +111,14 @@ namespace Sprout_Downloader
             return _lazyKey.Value;
         }
 
-        public IEnumerable<Segment> GetSegments()
+        public List<Segment> GetSegments()
         {
             return _lazySegments.Value;
         }
 
         public int GetSegmentsCount()
         {
-            return GetSegments().Count();
+            return GetSegments().Count;
         }
     }
 
@@ -131,7 +137,13 @@ namespace Sprout_Downloader
 
     public class Segment
     {
+        public string Folder { get; set; }
         public string Filename { get; set; }
         public string Url { get; set; }
+
+        public string GetFullPath()
+        {
+            return Folder + "/" + Filename;
+        }
     }
 }

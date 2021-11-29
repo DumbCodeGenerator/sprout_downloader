@@ -1,7 +1,6 @@
 ﻿using System.Drawing.Text;
-using System.Windows.Forms;
 
-namespace Sprout_Downloader
+namespace Sprout_Downloader.UI
 {
     public class AntiAliasingLabel : Label
     {

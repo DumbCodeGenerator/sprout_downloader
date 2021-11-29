@@ -1,9 +1,7 @@
-﻿using System;
-using System.Linq.Expressions;
+﻿using System.Linq.Expressions;
 using System.Reflection;
-using System.Windows.Forms;
 
-namespace Sprout_Downloader
+namespace Sprout_Downloader.Util
 {
     public static class Extensions
     {
@@ -12,12 +10,41 @@ namespace Sprout_Downloader
             return source?.IndexOf(toCheck, comp) >= 0;
         }
 
+        public static bool CheckUrlValid(this string source)
+        {
+            return Uri.TryCreate(source, UriKind.Absolute, out Uri uriResult) &&
+                   (uriResult.Scheme == Uri.UriSchemeHttps || uriResult.Scheme == Uri.UriSchemeHttp);
+        }
+
+        public static List<ParsedURL> ParseURL(this TextBox @this)
+        {
+            List<ParsedURL> urls = new List<ParsedURL>();
+            foreach (string line in @this.Lines)
+            {
+                string[] parts = line.Split("||");
+                if (parts.Length > 0)
+                {
+                    string url = parts[0];
+                    if (!url.StartsWith("http://") && !url.StartsWith("https://"))
+                        url = "https://" + url;
+
+                    string pass = null;
+                    if (parts.Length >= 2)
+                        pass = parts[1];
+
+                    if (url.CheckUrlValid())
+                        urls.Add(new ParsedURL { URL = url, Password = pass });
+                }
+            }
+            return urls;
+        }
+
         public static void SetPropertyThreadSafe<TResult>(
             this Control @this,
             Expression<Func<TResult>> property,
             TResult value)
         {
-            var propertyInfo = (property.Body as MemberExpression)?.Member
+            PropertyInfo propertyInfo = (property.Body as MemberExpression)?.Member
                 as PropertyInfo;
 
             if (propertyInfo == null ||
@@ -37,7 +64,7 @@ namespace Sprout_Downloader
                     BindingFlags.SetProperty,
                     null,
                     @this,
-                    new object[] {value});
+                    new object[] { value });
         }
 
         private delegate void SetPropertyThreadSafeDelegate<TResult>(
