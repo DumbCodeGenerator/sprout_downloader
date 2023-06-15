@@ -280,7 +280,7 @@ namespace Sprout_Downloader
                 return;
 
             SetAction("Decrypt and concat segments into one file...");
-            string title = parser.GetVideoTitle();
+            string title = parser.GetVideoTitle().Replace("\"", "");;
             Key key = parser.GetPlaylistParser().GetKey();
 
             await Task.Run(() =>
